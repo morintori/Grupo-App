@@ -7,15 +7,14 @@ from dash.dependencies import Input, Output
 import numpy as np
 import json
 
-
 np.set_printoptions(threshold=np.inf)
 
 gdf = pd.read_csv('Mexico State Centroids.csv')
 df = pd.read_csv('data_agg.csv')
-df = df.rename(columns={'Demanda_uni_equil': 'Units Sold', 'Semana': 'Week', 'NombreProducto': 'Product Name'})
+# df = df.rename(columns={'Demanda_uni_equil': 'Units Sold', 'Semana': 'Week', 'NombreProducto': 'Product Name'})
 repo_url = 'https://raw.githubusercontent.com/angelnmara/geojson/master/mexicoHigh.json'
 mx_regions_geo = requests.get(repo_url).json()
-mapboxtoken = 'pk.eyJ1IjoibW9yaW50b3JpIiwiYSI6ImNsZjJmeHlmMTBoeXE0MnBqcGZlcWIycmMifQ.m-Dc6TVBBiolSNXX8aNsBA'
+mapboxtoken = 'pk.eyJ1IjoibW9yaW50b3JpIiwiYSI6ImNsZmE3a2I1aTJteHAzeGxoZXhpZXB6OHIifQ.yxdD2S1f7B3M1PsP7JVGug'
 mapboxstyle = 'mapbox://styles/morintori/clf2nnygd001h01kdt0qr5hq8'
 
 product_names = df['Product Name'].unique()
@@ -33,8 +32,8 @@ max_color = {'Revenue': max_rev_week, 'Units Sold': max_dem_week}
 max_color_total = {'Revenue': max_rev_total, 'Units Sold': max_dem_total}
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
-
-app = Dash(__name__, external_stylesheets=external_stylesheets,suppress_callback_exceptions=True)
+app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
+app.config['suppress_callback_exceptions'] = True
 app.title = 'Grupo Bimbo Inventory Demand'
 app._favicon = ('favicon.ico')
 server = app.server
@@ -48,15 +47,12 @@ styles = {
 app.layout = html.Div([
     html.H2(children='Grupo Bimbo Demand'),
     html.H6('Grupo Bimbo is a Mexican bakery chain that sells their baked goods country-wide,'
-            ' here we have the inventory demand for the bakery organized by State and Product Cluster.'
-            ' The inventory demand for weeks 10 and 11 were predicted using a XGBoost model, weeks 3-9 is the train'
-            ' set.'
-            ' Product Clusters were created by using a Natural Language Processing Model using Spherical K-Means to'
-            ' seperate the products into 30 clusters. Revenue is based on Revenue/week.'
-            ' Product Clusters/States in the bar chart can be clicked to display its distribution in the pie chart'
-            ', the products in the pie chart can be clicked to display its demand over time. The dropdown menu '
-            'below for product names can be chosen to display its time series. Below that, product clusters can be '
-            'chosen to see its component products.'),
+            ' here we have the inventory demand for the bakery organized by State and Product.'
+            ' The inventory demand for weeks 10 and 11 were predicted using a XGBoost model, weeks 3-9 is the real'
+            ' set. The user can select Revenue/Units Sold for an understanding of how much demand there was for the '
+            ' Product. The Graphs are interactive, clicking on different sectors will allow different segments of data'
+            ' to be displayed. A dropdown is provided to search for the Revenue/Units Sold over time for any product.'
+            ),
     html.Div([
 
         html.Div([
@@ -73,9 +69,7 @@ app.layout = html.Div([
                 labelStyle={'display': 'inline-block', 'marginTop': '5px'}
             ),
             html.Div(id='state_or_product_graph'),
-            # dcc.Graph(
-            #     id='state_or_product_graph',
-            # ),
+
             dcc.Slider(
                 3,
                 12,
@@ -90,7 +84,7 @@ app.layout = html.Div([
             style={'width': '49%', 'display': 'inline-block', 'padding': '0 20'}),
 
         html.Div([
-            dcc.Store(id = 'state_name'),
+            dcc.Store(id='sp_name'),
             dcc.Graph(id='cluster-pie',
                       clickData={'points': [{'label': '0'}]},
                       hoverData={'points': [{'label': '0'}]}
@@ -115,11 +109,6 @@ app.layout = html.Div([
                     figure=summary_fig
                 ),
 
-                # html.H6('Product Cluster',id='display_type'),
-                #
-                # dcc.Dropdown(clusters_prod,id='product_cluster'),
-                # html.Hr(),
-                # html.Pre(id = 'display_product_names',style = styles['pre'])
             ], className='twelve columns'),
             dcc.Clipboard(target_id="structure"),
             html.Pre(
@@ -132,40 +121,9 @@ app.layout = html.Div([
         ])
 
     ])
-    # html.Div([
-    #
-    #
-    # ], style={'width': '49%', 'float': 'right', 'display': 'inline-block'})
 
 ])
 
-
-# html.Div([
-#     # dcc.Graph(
-#     #     id='state_or_product_graph',
-#     #     clickData={'points': [{'label': 'México'}]}
-#     # ),
-#     # dcc.Slider(
-#     #
-#     #     3,
-#     #     12,
-#     #     step=None,
-#     #     id='crossfilter-Semana-slider',
-#     #     value=11,
-#     #     marks={str(Semana): (str(Semana) if Semana !=12 else 'All') for Semana in semana_list},
-#     # ),
-#
-# ], style={'width': '49%', 'display': 'inline-block', 'padding': '0 20'}),
-
-
-# @app.callback(
-#     Output('display_product_names','children'),
-#     Input('product_cluster','value'),
-# )
-# def show_cluster(value):
-#     prodInClust = product_list[product_list['cluster']==value]['NombreProducto'].unique()
-#
-#     return '{}'.format(prodInClust)
 
 @app.callback(
     Output('state_or_product_graph', 'children'),
@@ -177,203 +135,232 @@ app.layout = html.Div([
 def update_graph(semana, x_type, y_type):
     if x_type == 'Product':
         x_type = 'Product Name'
-    if semana == 12:
-        dff = df[[x_type, y_type]].groupby(x_type) \
-            .sum().reset_index()
-        zmax_ = max_color_total[y_type]
-    else:
-        dff = df[df['Week'] == semana][[x_type, y_type]].groupby(x_type) \
-            .sum().reset_index()
-        zmax_ = max_color[y_type]
 
     if x_type == 'State':
-        gdff=gdf.copy()
-        gdff = gdff.merge(dff,how='left', left_on ='name',right_on='State')
-        gdff['Revenue']='$' + (gdff['Revenue'].astype(float)/1000000).round(2).astype(str) + 'MM'
-        # print(gdff.head())
-        data = [go.Choroplethmapbox(geojson=mx_regions_geo, ids=dff['State'], z=dff[y_type],
-                                    locations=dff['State'], featureidkey='properties.name', colorscale='reds',
-                                    marker=dict(line=dict(color='black'), opacity=0.6),
-                                    zmin = 0, zmax = zmax_
-                                    ),
-                go.Scattermapbox(
-                                # hoverinfo=gdff['Revenue'],
-                                lat = gdff['lat'],lon = gdff['lon'],
-                                text = gdff['Revenue'],
-                                textfont= {'color':'black','size':15,'family':'Courier New'},
-                                mode = 'text',
-                                name = 'Revenue',
+        if semana == 12:
+            dff = df[[x_type, y_type]].groupby(x_type).sum().reset_index()
+            zmax_ = max_color_total[y_type]
+        else:
+            dff = df[df['Week'] == semana][[x_type, y_type]].groupby(x_type).sum().reset_index()
+            zmax_ = max_color[y_type]
 
-                                ),
+        gdff = gdf.copy()
+        gdff = gdff.merge(dff, how='left', left_on='name', right_on='State')
+        if y_type == 'Revenue':
+            gdff['Revenue'] = '$' + (gdff['Revenue'].astype(float) / 1000000).round(2).astype(str) + 'MM'
+        elif y_type == 'Units Sold':
+            gdff['Units Sold'] = (gdff['Units Sold'].astype(float) / 1000000).round(2).astype(str) + 'MM'
+        # np.stack((df['height'], df['thickness_1'], df['thickness_2']), axis=-1)
+
+        dff['Y MM'] = (dff[y_type].astype(float) / 1000000)
+        if y_type == 'Revenue':
+            pre = '$'
+        else:
+            pre = ''
+        if (semana <= 11) & (semana > 3):
+
+            dfff = df[df['Week'] == (semana - 1)][[x_type, y_type]].groupby(x_type).sum().reset_index()
+            dff = dff.merge(dfff, how='left', on='State', suffixes=[None, '_y'])
+            dff['Percent Change'] = ((dff[y_type] - dff[y_type + '_y']) / dff[y_type] * 100).round(1)
+            cmb = go.Choroplethmapbox(geojson=mx_regions_geo, ids=dff['State'], z=dff[y_type],
+                                      locations=dff['State'], featureidkey='properties.name', colorscale='reds',
+                                      marker=dict(line=dict(color='black'), opacity=0.6),
+                                      zmin=0, zmax=zmax_, name=y_type,
+                                      customdata=np.stack((dff['Percent Change'],dff['Y MM']),axis=-1),
+                                      hovertemplate=
+                                      '<b>%{id}</b><br>' +
+                                      pre +
+                                      '%{customdata[1]:.2f} MM<br>' +
+                                      '%{customdata[0]}%'
+                                      )
+        else:
+
+            cmb = go.Choroplethmapbox(geojson=mx_regions_geo, ids=dff['State'], z=dff[y_type],
+                                      locations=dff['State'], featureidkey='properties.name', colorscale='reds',
+                                      marker=dict(line=dict(color='black'), opacity=0.6),
+                                      zmin=0, zmax=zmax_, name=y_type, customdata=(dff['Y MM']),
+                                      hovertemplate=
+                                      '<b>%{id}</b><br>' +
+                                      pre +
+                                      '%{customdata:.2f} MM'
+                                      )
+        data = [cmb,
+                go.Scattermapbox(
+                    # hoverinfo=gdff['Revenue'],
+                    lat=gdff['lat'], lon=gdff['lon'],
+                    text=gdff[y_type],
+                    textfont={'color': 'black', 'size': 10, 'family': 'Courier New'},
+                    mode='text',
+                    name=y_type, hoverinfo='skip'
+
+                ),
                 ]
         layout = go.Layout(
             autosize=True,
             mapbox={
-            'accesstoken': mapboxtoken,
-            'style': mapboxstyle,
-            'zoom': 4,
-            'center': {'lat': 25, 'lon': -99}},
+                'accesstoken': mapboxtoken,
+                'style': mapboxstyle,
+                # 'style': 'open-street-map',
+                'zoom': 4,
+                'center': {'lat': 25, 'lon': -99}},
             margin={"r": 0, "t": 0, "l": 0, "b": 0},
             height=700,
 
-            )
+        )
+    elif x_type == 'Product Name':
+        if semana == 12:
+            dff = df
+        else:
+            dff = df[df['Week'] == semana]
+        fig = px.treemap(dff, path=[px.Constant('all'), 'Type', 'Product Name'], values=y_type, height=700)
+        fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+        data = fig['data']
+        layout = fig['layout']
 
-    return dcc.Graph(id='graph',figure={'data': data, 'layout': layout}, )
+    return dcc.Graph(id='graph', figure={'data': data, 'layout': layout}, )
+
 
 @app.callback(
-    Output('state_name','data'),
+    Output('sp_name', 'data'),
     Input('graph', 'clickData'),
-    Input('state_or_product_dd', 'value'),
+    Input('state_or_product_dd', 'value'), prevent_initial_call=True
 )
-def store_state_name(clickData, x_type):
-    if x_type =='State':
-        number_ = clickData['points'][0]['pointNumber']
-        name_ = gdf.iloc[number_,:]['name']
+def store_sp_name(clickData, x_type):
+    if x_type == 'State':
+        number_ = int(clickData['points'][0]['pointNumber'])
+        name_ = gdf.iloc[number_, :]['name']
+    elif x_type == 'Product':
+        name_ = clickData['points'][0]['label']
     return name_
 
-@app.callback(
-    Output("structure", "children"),
-    Input("cluster-pie", "clickData"))
-def display_structure(fig_json):
-    return json.dumps(fig_json, indent=2)
+
+# @app.callback(
+#     Output("structure", "children"),
+#     Input('cluster-pie', 'clickData'))
+# def display_structure(fig_json):
+#     return json.dumps(fig_json, indent=2)
 
 
-def create_pie(dff,y_type, title):
-
+def create_pie(dff, y_type, x_type, title):
+    if x_type == 'State':
+        names_ = 'Product Name'
+    elif x_type == 'Product Name':
+        names_ = 'State'
     fig = px.pie(dff,
-                 names = 'Product Name',
+                 names=names_,
                  values=y_type,
-                 height = 700,
+                 height=700,
                  )
 
-    fig.update_traces(textposition='inside',
-                      hovertemplate =
-                      '<b>%{label}</b><br>'+
-                      '<i>Revenue:</i> $%{value}'
-                      )
-    fig.update_layout(uniformtext_minsize=12, uniformtext_mode='hide',margin=dict(t=50, l=25, r=25, b=25),\
-                      title ='Top 20 Products by ' + y_type + ' in ' + title,)
+    if y_type == 'Revenue':
+        fig.update_traces(textposition='inside',
+                          hovertemplate=
+                          '<b>%{label}</b><br>' +
+                          '<i>Revenue:</i> $%{value}'
+                          )
+    elif y_type == 'Units Sold':
+        fig.update_traces(textposition='inside',
+                          hovertemplate=
+                          '<b>%{label}</b><br>' +
+                          '<i>Units Sold:</i> $%{value}'
+                          )
+
+    fig.update_layout(uniformtext_minsize=12, uniformtext_mode='hide', margin=dict(t=50, l=25, r=25, b=25), \
+                      title=title, )
 
     return fig
-#
-def create_time_series(dff,y_type,title,axis_type,sp_name):
 
-    fig = px.scatter(dff,x='Week',y=y_type)
+
+#
+def create_time_series(dff, y_type, title, axis_type, sp_name):
+    fig = px.scatter(dff, x='Week', y=y_type)
     fig.update_traces(mode='lines+markers')
-    fig.update_xaxes(showgrid=False,tickmode='linear',dtick=1)
+    fig.update_xaxes(showgrid=False, tickmode='linear', dtick=1)
     fig.update_yaxes(type='linear' if axis_type == 'Linear' else 'log')
     fig.add_annotation(x=0, y=0.85, xanchor='left', yanchor='bottom',
                        xref='paper', yref='paper', showarrow=False, align='left',
                        text=title)
-    fig.update_layout(height=225, margin={'l': 20, 'b': 30, 'r': 10, 't': 30}, title = 'Product '+ y_type + \
-                                                                        ' Per Week in ' + sp_name, title_x = 0.5)
+    fig.update_layout(height=225, margin={'l': 20, 'b': 30, 'r': 10, 't': 30}, title='Product ' + y_type + \
+                                                                                     ' Per Week in ' + sp_name,
+                      title_x=0.5)
     return fig
-# #
-# @app.callback(
-#     Output('product name','children'),
-#     Input('cluster-pie','hoverData'),
-# )
-# def display_product_name(hoverData):
-#
-#     product_ID = hoverData['points'][0]['label']
-#
-#     product_name = product_list[product_list['Producto_ID']==int(product_ID)]['NombreProducto'].item()
-#     return str(product_name)
-#
-#
-#
+
+
 @app.callback(
-    Output('time-series','figure'),
-    Input('cluster-pie','clickData'),
-    Input('state_name','data'),
-    Input('time-series-select','value'),
+    Output('time-series', 'figure'),
+    Input('cluster-pie', 'clickData'),
+    Input('sp_name', 'data'),
+    Input('time-series-select', 'value'),
     Input('rev_or_units_radio', 'value'),
-    Input('crossfilter-yaxis-type','value')
+    Input('state_or_product_dd', 'value'),
+    Input('crossfilter-yaxis-type', 'value'), prevent_initial_call=True
 )
-def update_ts(clickData,sp_name,p_Select,y_type,axis_type):
+def update_ts(clickData, sp_name, p_Select, y_type, x_type, axis_type):
     trig_id = ctx.triggered_id if not None else 1
     if trig_id == 'time-series-select':
         product_nm = ctx.triggered[0]['value']
+        if x_type == 'Product':
+            sp_name = clickData['points'][0]['label']
 
     else:
         product_nm = clickData['points'][0]['label']
+        if x_type == 'Product':
+            sp_name_ = sp_name
+            sp_name = product_nm
+            product_nm = sp_name_
 
-    dff =df[df['Product Name']==product_nm]
+    dff = df[df['Product Name'] == product_nm]
     dff = dff[dff['State'] == sp_name]
 
-    dff = dff[[ 'Week', y_type]].groupby(['Week']).sum().reset_index()
+    dff = dff[['Week', y_type]].groupby(['Week']).sum().reset_index()
 
-    # product_name= product_list[product_list['Producto_ID']==int(product_id)]['NombreProducto'].item()
-    return create_time_series(dff,y_type,product_nm,axis_type,sp_name)
+    return create_time_series(dff, y_type, product_nm, axis_type, sp_name)
+
 
 # #
 @app.callback(
     Output('cluster-pie', 'figure'),
     Input('graph', 'clickData'),
-    Input('crossfilter-Semana-slider','value'),
-    Input('state_name','data'),
+    Input('crossfilter-Semana-slider', 'value'),
+    Input('sp_name', 'data'),
     Input('rev_or_units_radio', 'value'),
-    Input('state_or_product_dd', 'value'),
+    Input('state_or_product_dd', 'value'), prevent_initial_call=True
 )
-def update_pie(clickData,semana,sp_name,y_type,x_type):
-    # print(clickData['points'][0]['pointNumber'])
-    # if x_type =='State':
-    #     number_ = clickData['points'][0]['pointNumber']
-    #     name_ = gdf.iloc[number_,:]['name']
-    # print(sp_name)
-    if semana == 12:
-        dff = df[df[x_type]== sp_name]
-        dff = dff[['Product Name', y_type]].groupby('Product Name') \
-            .sum().reset_index()
+def update_pie(clickData, semana, sp_name, y_type, x_type):
+    if x_type == 'State':
+        if semana == 12:
+            dff = df[df[x_type] == sp_name]
+            dff = dff[['Product Name', y_type]].groupby('Product Name') \
+                .sum().reset_index()
 
-    else:
-        dff = df[df['Week'] == semana]
-        dff = dff[dff[x_type]== sp_name]
-        dff = dff[['Product Name', y_type]].groupby('Product Name') \
-            .sum().reset_index()
+            title = '<b>{}</b><br>'.format(sp_name)
 
-    if x_type =='State':
-        dff= dff.sort_values(by='Revenue', ascending=False)
-        dff = dff.iloc[:20,:]
 
-    title = '<b>{}</b><br>week:{}'.format(sp_name, semana)
+        else:
+            dff = df[df['Week'] == semana]
+            dff = dff[dff[x_type] == sp_name]
+            dff = dff[['Product Name', y_type]].groupby('Product Name') \
+                .sum().reset_index()
+            title = '<b>{}</b><br>week:{}'.format(sp_name, semana)
 
-    return create_pie(dff,y_type, title)
+        title = 'Top 20 Products by ' + y_type + ' in ' + title
+        dff = dff.sort_values(by=y_type, ascending=False)
+        dff = dff.iloc[:20, :]
+    elif x_type == 'Product':
+        x_type = 'Product Name'
+        if semana == 12:
+            dff = df[df[x_type] == sp_name]
+            dff = dff[['State', y_type]].groupby('State').sum().reset_index()
+            title = '<b>{}</b><br>'.format(sp_name)
+        else:
+            dff = df[df['Week'] == semana]
+            dff = dff[dff[x_type] == sp_name]
+            dff = dff[['State', y_type]].groupby('State').sum().reset_index()
+            title = '<b>{}</b><br>week:{}'.format(sp_name, semana)
+        title = 'Distribution of ' + title + ' ' + y_type + ' by State'
+
+    return create_pie(dff, y_type, x_type, title)
+
 
 if __name__ == '__main__':
     app.run_server(debug=True, host="0.0.0.0")
-
-# next steps add map to replace main bar graph, search bar to group like items and display
-
-# if x_type == 'State':
-#     print(dff.head())
-#     data = [go.Choroplethmapbox(geojson=mx_regions_geo, ids=dff['State'], z=dff[y_type],
-#                                         locations=dff['State'], featureidkey='properties.name', colorscale='reds',
-#                                         marker=dict(line=dict(color='black'), opacity=0.6))]
-#     # fig.add_trace(go.Choroplethmapbox(name='Mexico', geojson=mx_regions_geo, ids=dff['State'], z=dff[y_type],
-#     #                                     locations=dff['State'], featureidkey='properties.name', colorscale='reds',
-#     #                                     marker=dict(line=dict(color='black'), opacity=0.6)))
-#     layout = go.Layout(mapbox = {
-#                             'style':'open-street-map',
-#                             'zoom':4,
-#                             'center':{'lat': 25, 'lon': -99}},
-#                        margin={"r": 0, "t": 0, "l": 0, "b": 0})
-#     # fig.update_layout(mapbox_style='open-street-map',
-#     #                   mapbox_zoom=4,
-#     #                   mapbox_center={'lat': 25, 'lon': -99}
-#     #                   )
-#     # fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
-#     # fig = px.choropleth(data_frame=dff,
-#     #                     geojson=mx_regions_geo,
-#     #                     locations='State',  # nombre de la columna del Dataframe
-#     #                     featureidkey='properties.name',
-#     #                     # ruta al campo del archivo GeoJSON con el que se hará la relación (nombre de los estados)
-#     #                     color=y_type,  # El color depende de las cantidades
-#     #                     color_continuous_scale="burg",
-#     #                     scope="north america"
-#     #                     )
-#     #
-#     # fig.update_geos(showcountries=True, showcoastlines=True, showland=True, fitbounds="locations")
-# elif x_type =='Product Name':
-#     data=[go.Scatter(x = dff[x_type],y=df[y_type])]
-#     layout = go.Layout()
