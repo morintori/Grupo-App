@@ -11,14 +11,17 @@ np.set_printoptions(threshold=np.inf)
 
 gdf = pd.read_csv('Mexico State Centroids.csv')
 df = pd.read_csv('data_agg.csv')
-# df = df.rename(columns={'Demanda_uni_equil': 'Units Sold', 'Semana': 'Week', 'NombreProducto': 'Product Name'})
-repo_url = 'https://raw.githubusercontent.com/angelnmara/geojson/master/mexicoHigh.json'
-mx_regions_geo = requests.get(repo_url).json()
+
+repo_url = 'mexicoHigh.json'
+with open(repo_url,'r') as f:
+    mx_regions_geo = json.load(f)
+# mx_regions_geo = requests.get(repo_url).json()
 mapboxtoken = 'pk.eyJ1IjoibW9yaW50b3JpIiwiYSI6ImNsZmE3a2I1aTJteHAzeGxoZXhpZXB6OHIifQ.yxdD2S1f7B3M1PsP7JVGug'
 mapboxstyle = 'mapbox://styles/morintori/clf2nnygd001h01kdt0qr5hq8'
 
 product_names = df['Product Name'].unique()
 semana_list = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+type_list = df['Type'].unique()
 
 sum_fig_df = df[['Week', 'Revenue']].groupby(['Week']).sum().reset_index()
 summary_fig = px.scatter(sum_fig_df, x='Week', y='Revenue')
@@ -48,10 +51,12 @@ app.layout = html.Div([
     html.H2(children='Grupo Bimbo Demand'),
     html.H6('Grupo Bimbo is a Mexican bakery chain that sells their baked goods country-wide,'
             ' here we have the inventory demand for the bakery organized by State and Product.'
-            ' The inventory demand for weeks 10 and 11 were predicted using a XGBoost model, weeks 3-9 is the real'
-            ' set. The user can select Revenue/Units Sold for an understanding of how much demand there was for the '
+            ' The inventory demand for weeks 10 and 11 were predicted using a XGBoost model.'
+            ' The user can select Revenue/Units Sold for an understanding of how much demand there was for the '
             ' Product. The Graphs are interactive, clicking on different sectors will allow different segments of data'
             ' to be displayed. A dropdown is provided to search for the Revenue/Units Sold over time for any product.'
+            ' The purpose of this dashboard is to inform seasonal changes in the demand of certain products, as well as'
+            ' the popularity of different items.'
             ),
     html.Div([
 
@@ -84,7 +89,8 @@ app.layout = html.Div([
             style={'width': '49%', 'display': 'inline-block', 'padding': '0 20'}),
 
         html.Div([
-            dcc.Store(id='sp_name'),
+            dcc.Store(id='sp_name', data='Ciudad de México'),
+            html.Div(id='pie_type_or_product'),
             dcc.Graph(id='cluster-pie',
                       clickData={'points': [{'label': '0'}]},
                       hoverData={'points': [{'label': '0'}]}
@@ -94,6 +100,12 @@ app.layout = html.Div([
                 ['Linear', 'Log'],
                 'Linear',
                 id='crossfilter-yaxis-type',
+                labelStyle={'display': 'inline-block', 'marginTop': '5px'}
+            ),
+            dcc.RadioItems(
+                ['State', 'Country'],
+                'State',
+                id='crossfilter-state-country',
                 labelStyle={'display': 'inline-block', 'marginTop': '5px'}
             ),
 
@@ -212,12 +224,35 @@ def update_graph(semana, x_type, y_type):
             dff = df
         else:
             dff = df[df['Week'] == semana]
+        dff = dff[['Product Name',y_type,'Type']].groupby(['Product Name','Type']).sum().reset_index()
+        dff = dff.sort_values(by=y_type, ascending=False)
+        dff = dff.iloc[:500, :]
         fig = px.treemap(dff, path=[px.Constant('all'), 'Type', 'Product Name'], values=y_type, height=700)
+        fig.data[0].textinfo = 'value + percent parent'
         fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
         data = fig['data']
         layout = fig['layout']
 
-    return dcc.Graph(id='graph', figure={'data': data, 'layout': layout}, )
+    return dcc.Graph(id='graph', figure={'data': data, 'layout': layout}, \
+                     clickData={"points":[{"id":"Ciudad de México","label":"Nito 1p 62g Central BIM 2425"}]} )
+
+
+@app.callback(
+    Output('pie_type_or_product','children'),
+    Input('state_or_product_dd', 'value'),
+)
+def display_productortype(sp):
+    if sp == 'State':
+        buttons = dcc.RadioItems(
+            ['Top 20 Products', 'Product Types'],
+            'Top 20 Products',
+            id='types_or_top20',
+            labelStyle={'display': 'inline-block', 'marginTop': '5px'})
+    elif sp == 'Product':
+        buttons = dcc.RadioItems(
+            id='types_or_top20',
+            labelStyle={'display': 'inline-block', 'marginTop': '5px'})
+    return buttons
 
 
 @app.callback(
@@ -227,25 +262,22 @@ def update_graph(semana, x_type, y_type):
 )
 def store_sp_name(clickData, x_type):
     if x_type == 'State':
-        number_ = int(clickData['points'][0]['pointNumber'])
-        name_ = gdf.iloc[number_, :]['name']
+        name_ = clickData['points'][0]['id']
+
     elif x_type == 'Product':
         name_ = clickData['points'][0]['label']
     return name_
 
 
-# @app.callback(
-#     Output("structure", "children"),
-#     Input('cluster-pie', 'clickData'))
-# def display_structure(fig_json):
-#     return json.dumps(fig_json, indent=2)
+@app.callback(
+    Output("structure", "children"),
+    Input('graph ', 'clickData'))
+def display_structure(fig_json):
+    return json.dumps(fig_json, indent=2)
 
 
-def create_pie(dff, y_type, x_type, title):
-    if x_type == 'State':
-        names_ = 'Product Name'
-    elif x_type == 'Product Name':
-        names_ = 'State'
+def create_pie(dff, y_type, names_, title):
+
     fig = px.pie(dff,
                  names=names_,
                  values=y_type,
@@ -280,6 +312,7 @@ def create_time_series(dff, y_type, title, axis_type, sp_name):
     fig.add_annotation(x=0, y=0.85, xanchor='left', yanchor='bottom',
                        xref='paper', yref='paper', showarrow=False, align='left',
                        text=title)
+
     fig.update_layout(height=225, margin={'l': 20, 'b': 30, 'r': 10, 't': 30}, title='Product ' + y_type + \
                                                                                      ' Per Week in ' + sp_name,
                       title_x=0.5)
@@ -293,9 +326,11 @@ def create_time_series(dff, y_type, title, axis_type, sp_name):
     Input('time-series-select', 'value'),
     Input('rev_or_units_radio', 'value'),
     Input('state_or_product_dd', 'value'),
-    Input('crossfilter-yaxis-type', 'value'), prevent_initial_call=True
+    Input('crossfilter-yaxis-type', 'value'),
+    Input('crossfilter-state-country', 'value'),
+    prevent_initial_call=True
 )
-def update_ts(clickData, sp_name, p_Select, y_type, x_type, axis_type):
+def update_ts(clickData, sp_name, p_Select, y_type, x_type, axis_type,st_cn):
     trig_id = ctx.triggered_id if not None else 1
     if trig_id == 'time-series-select':
         product_nm = ctx.triggered[0]['value']
@@ -309,58 +344,101 @@ def update_ts(clickData, sp_name, p_Select, y_type, x_type, axis_type):
             sp_name = product_nm
             product_nm = sp_name_
 
-    dff = df[df['Product Name'] == product_nm]
-    dff = dff[dff['State'] == sp_name]
+    if product_nm in type_list:
+        dff = df[df['Type'] == product_nm]
+    else:
+        dff = df[df['Product Name'] == product_nm]
+
+    if st_cn == 'State':
+        dff = dff[dff['State'] == sp_name]
+    elif st_cn =='Country':
+        sp_name = 'Country-Wide'
+
 
     dff = dff[['Week', y_type]].groupby(['Week']).sum().reset_index()
 
     return create_time_series(dff, y_type, product_nm, axis_type, sp_name)
 
 
-# #
+
 @app.callback(
     Output('cluster-pie', 'figure'),
     Input('graph', 'clickData'),
     Input('crossfilter-Semana-slider', 'value'),
     Input('sp_name', 'data'),
     Input('rev_or_units_radio', 'value'),
-    Input('state_or_product_dd', 'value'), prevent_initial_call=True
+    Input('state_or_product_dd', 'value'),
+    Input('time-series-select', 'value'),
+    Input('types_or_top20','value'),
+    Input('crossfilter-state-country','value'),
+    prevent_initial_call=True
 )
-def update_pie(clickData, semana, sp_name, y_type, x_type):
-    if x_type == 'State':
-        if semana == 12:
-            dff = df[df[x_type] == sp_name]
-            dff = dff[['Product Name', y_type]].groupby('Product Name') \
-                .sum().reset_index()
+def update_pie(clickData, semana, sp_name, y_type, x_type,pd_choice,typetop20,st_cn):
 
+    trig_id = ctx.triggered_id if not None else 1
+
+    if trig_id == 'time-series-select':
+        if x_type == 'Product':
+            sp_name = ctx.triggered[0]['value']
+
+    if x_type == 'State':
+        if typetop20 == 'Product Types':
+            labs = 'Type'
+        elif typetop20 == 'Top 20 Products':
+            labs = 'Product Name'
+
+        if semana == 12:
+            if st_cn == 'State':
+                dff = df[df[x_type] == sp_name]
+            elif st_cn== 'Country':
+                sp_name = 'Country of Mexico'
+            dff = dff[[labs, y_type]].groupby(labs) \
+                .sum().reset_index()
             title = '<b>{}</b><br>'.format(sp_name)
 
 
         else:
             dff = df[df['Week'] == semana]
-            dff = dff[dff[x_type] == sp_name]
-            dff = dff[['Product Name', y_type]].groupby('Product Name') \
+            if st_cn == 'State':
+                dff = df[df[x_type] == sp_name]
+            elif st_cn == 'Country':
+                sp_name = 'Country of Mexico'
+            dff = dff[[labs, y_type]].groupby(labs) \
                 .sum().reset_index()
             title = '<b>{}</b><br>week:{}'.format(sp_name, semana)
 
-        title = 'Top 20 Products by ' + y_type + ' in ' + title
-        dff = dff.sort_values(by=y_type, ascending=False)
-        dff = dff.iloc[:20, :]
+        title = typetop20 + ' by ' + y_type + ' in ' + title
+
+        if typetop20 == 'Top 20 Products':
+            dff = dff.sort_values(by=y_type, ascending=False)
+            dff = dff.iloc[:20, :]
+            names_ = 'Product Name'
+        elif typetop20 == 'Product Types':
+            names_ = 'Type'
+
+
     elif x_type == 'Product':
         x_type = 'Product Name'
         if semana == 12:
-            dff = df[df[x_type] == sp_name]
+            if sp_name in type_list:
+                dff = df[df['Type'] == sp_name]
+            else:
+                dff = df[df[x_type] == sp_name]
             dff = dff[['State', y_type]].groupby('State').sum().reset_index()
             title = '<b>{}</b><br>'.format(sp_name)
         else:
             dff = df[df['Week'] == semana]
-            dff = dff[dff[x_type] == sp_name]
+            if sp_name in type_list:
+                dff = dff[dff['Type']==sp_name]
+            else:
+                dff = dff[dff[x_type] == sp_name]
             dff = dff[['State', y_type]].groupby('State').sum().reset_index()
             title = '<b>{}</b><br>week:{}'.format(sp_name, semana)
         title = 'Distribution of ' + title + ' ' + y_type + ' by State'
+        names_ = 'State'
 
-    return create_pie(dff, y_type, x_type, title)
+    return create_pie(dff, y_type, names_, title)
 
 
 if __name__ == '__main__':
-    app.run_server(debug=True, host="0.0.0.0")
+    app.run_server(debug=False, host="0.0.0.0")
